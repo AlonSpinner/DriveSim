@@ -5,8 +5,8 @@ function setup(block) %runs at t=0 i/o definitions
 block.SetSimViewingDevice(true);
 
 %dialog parameters
-block.NumDialogPrms = 2;
-block.DialogPrmsTunable = {'Nontunable','Nontunable'}; %can change during simulation
+block.NumDialogPrms = 3;
+block.DialogPrmsTunable = {'Nontunable','Nontunable','Nontunable'}; %can change during simulation
 %[ControlTs,L]
 
 %register number of ports
@@ -76,50 +76,80 @@ else %figure exists, just clear it and start a new
 end
 end
 function Outputs(block) %runs on every dt
-UserData=get(gcbh,'UserData');
+UserData=get(gcbh,'UserData'); %UserData is now a struct of handles and is NOT connected to BlockHandle
 if ~ishghandle(UserData.Fig)
      UserData=SetupFigAndUserData(block); %set figure to a new start
 end
 %General inputs
+L=block.DialogPrm(2).Data;
+Vmax=block.DialogPrm(3).Data;
 x=block.InputPort(2).Data(1);
 y=block.InputPort(2).Data(2);
-% v=block.InputPort(2).Data(3);
+v=block.InputPort(2).Data(3);
 theta=block.InputPort(2).Data(4);
-% delta=block.InputPort(2).Data(5);
+delta=block.InputPort(2).Data(5);
 
-%fix limits
-L=block.DialogPrm(2).Data;
-xlim(UserData.Axes,10*L*[-1,1]+x);  ylim(UserData.Axes,10*L*[-1,1]+y);
-
-%update Physics
-R=makehgtform('zrotate',theta);
-T=makehgtform('translate',[x,y,0]);
-UserData.hCarTransform.Matrix=T*R;
+%---------update Scene Axes
+Rcar=makehgtform('zrotate',theta);
+Tcar=makehgtform('translate',[x,y,0]);
+%update front wheels
+Tfrontwheels2center=makehgtform('translate',[-L/3,0,0]);
+RSteeringWheel=makehgtform('zrotate',delta);
+UserData.hFrontWheelsTransform.Matrix=Tcar*Rcar*inv(Tfrontwheels2center)*RSteeringWheel*Tfrontwheels2center;
+%update entire car
+UserData.hCarTransform.Matrix=Tcar*Rcar;
 addpoints(UserData.hPastLine,x,y);
-
-%Update time text
-Time=block.InputPort(3).Data(1);
-UserData.hTime.String=sprintf('Time %g[s]',Time);
 
 %outputs - keystrkes
 CurrentChar=UserData.Fig.CurrentCharacter;
 if ~isempty(CurrentChar)
-    block.OutputPort(1).Data=double(CurrentChar);
+    keypressed=double(CurrentChar);
+    block.OutputPort(1).Data=keypressed;
     block.OutputPort(2).Data=1;
     UserData.Fig.CurrentCharacter=char(0);
+    
+   if any(keypressed==[30,31]) %up/down - acceleration or deceleration
+       %Updated Limfactor
+       TargetAccelerationSign=sign(30.5-keypressed); %30 is accelerate and 31 is decelerate
+       TargetVelocity=v+(5/3.6)*TargetAccelerationSign;
+       UserData.LimFactor=10*(TargetVelocity/Vmax)+2;
+       set(gcbh,'UserData',UserData); %updates the whole of UserData... unfournate
+   end
 else
     block.OutputPort(1).Data=0;
     block.OutputPort(2).Data=0;
 end
 
+%updated SceneAxes limits
+xlim(UserData.SceneAxes,UserData.LimFactor*L*[-1,1]+x);
+ylim(UserData.SceneAxes,UserData.LimFactor*L*[-1,1]+y);
+
+%--------Update auxiliary axes
+
+%Update time text
+Time=block.InputPort(3).Data(1);
+UserData.hTimeTxt.String=sprintf('Time %g[s]',Time);
+
+%Update steering wheel orientation and text
+UserData.hSteeringWheelTransform.Matrix=RSteeringWheel;
+UserData.hSteeringAngleTxt.String=sprintf('Steering Angle %.3g[deg]',round(delta*180/pi));
+
+%Update odometer orientation and text
+UserData.hOdometerArrow.UData=cos(pi-v/Vmax*pi);
+UserData.hOdometerArrow.VData=sin(pi-v/Vmax*pi);
+UserData.hOdometerTxt.String=sprintf('Velocity %.3g[km/h]',round(v*3.6));
 
 drawnow limitrate
+end
+function Terminate(block)
+UserData=get(gcbh,'UserData');
+close(UserData.Fig,'WindowStyle','Normal');
 end
 %% Auxiliary functions
 function UserData=SetupFigAndUserData(block,varargin)
 if nargin<2 %figure was not provided in input
     %Create figure
-    FigName='OnlyPhysics';
+    FigName='Drive Sim';
     Fig = figure(...
         'Name',              FigName,...
         'NumberTitle',        'off',...
@@ -129,22 +159,69 @@ if nargin<2 %figure was not provided in input
         'ToolBar',           'auto',...
         'HandleVisibility',   'callback',...
         'Resize',            'on',...
-        'visible',           'on');
+        'visible',           'on',...
+        'units',            'normalized');
     
-    %Create Axes
-    Axes=axes(Fig);
-    hold(Axes,'on'); grid(Axes,'on'); axis(Axes,'manual')
-    Axes.DataAspectRatio=[1,1,1];
-    L=block.DialogPrm(2).Data; 
-    xlim(Axes,10*L*[-1,1]);  ylim(Axes,10*L*[-1,1]);
-    xlabel(Axes,'[m]'); ylabel(Axes,'[m]');
+    set(Fig,'WindowStyle','Modal');
+    
+    %Create Scene Axes
+    L=block.DialogPrm(2).Data;
+    SceneAxes=axes(...
+        'parent',       Fig,...
+        'position',     [0.2,0.1,0.9,0.8],... %[Left,Buttom,Height,Width]
+        'XLim',          2*L*[-1,1],...
+        'YLim',          2*L*[-1,1]);
+    hold(SceneAxes,'on'); grid(SceneAxes,'on'); axis(SceneAxes,'manual')
+    SceneAxes.DataAspectRatio=[1,1,1];
+    %Create TimeAxes,SteeringWheelAxes and OdometerAxes
+    TimeAxes=axes(...
+        'Parent',       Fig,...
+        'position',     [0,0.7,0.2,0.2],... %[Left,Buttom,Height,Width]
+        'NextPlot',     'add',...
+        'Xtick',        [],...
+        'Ytick',        [],...
+        'Xcolor',       'none',...
+        'Ycolor',       'none',...
+        'XLim',          [-2,2],...
+        'YLim',          [-2,2]);
+    SteeringWheelAxes=axes(...
+        'Parent',       Fig,...
+        'position',     [0,0.45,0.2,0.2],... %[Left,Buttom,Height,Width]
+        'NextPlot',     'add',...
+        'Xtick',        [],...
+        'Ytick',        [],...
+        'Xcolor',       'none',...
+        'Ycolor',       'none',...
+        'XLim',          [-2,2],...
+        'YLim',          [-2,2]);
+    OdometerAxes=axes(...
+        'Parent',       Fig,...
+        'position',     [0,0.2,0.2,0.2],... %[Left,Buttom,Height,Width]
+        'NextPlot',     'add',...
+        'Xtick',        [],...
+        'Ytick',        [],...
+        'Xcolor',       'none',...
+        'Ycolor',       'none',...
+        'XLim',          [-2,2],...
+        'YLim',          [-2,2]);
+    
+    %Create PushButton to stop simulation
+    uicontrol(...
+        'Parent',           Fig,...
+        'Style',            'pushbutton',...
+        'units',            'normalized',...
+        'Position',         [0.05 0.1 0.2 0.1],...
+        'String',           'Stop Simulation',...
+        'Backgroundcolor',  [0.3010, 0.7450, 0.9330],...
+        'Callback',     {@PushbuttonCallback});
+    
 else %figure was provided in input
     Fig=varargin{1};
-    Axes=findobj(Fig,'type','axes');
-    cla(Axes);
+    hAxes=findobj(Fig,'type','axes');
+    cla(hAxes);
 end
 
-%Initalize Drawing
+%Obtain data
 x=block.InputPort(2).Data(1);
 y=block.InputPort(2).Data(2);
 v=block.InputPort(2).Data(3);
@@ -152,51 +229,122 @@ theta=block.InputPort(2).Data(4);
 delta=block.InputPort(2).Data(5);
 L=block.DialogPrm(2).Data; 
 
-hCarTransform=hgtransform(Axes);
-DrawCar(hCarTransform,L/2,L);
-hPastLine=animatedline(Axes,0,0,'linewidth',2,'color','r');
+%-------------Initalize Drawing
 
-%Initalize text for time
-xtext=0.9*Axes.XLim(1)+0.1*Axes.XLim(2);
-ytext=0.1*Axes.YLim(1)+0.9*Axes.YLim(2);
-hTime=text(Axes,xtext,ytext,'');
+%SceneAxes 
+hCarTransform=hgtransform(SceneAxes);
+hFrontWheelsTransform=hgtransform(SceneAxes);
+DrawCar(hCarTransform,hFrontWheelsTransform,L/2,L);
+hPastLine=animatedline(SceneAxes,0,0,'linewidth',2,'color','r');
+
+%TimeAxes
+DrawClock(TimeAxes);
+hTimeTxt=text(TimeAxes,-1,2,'');
+
+%SteeringWheelAxes
+hSteeringWheelTransform=hgtransform(SteeringWheelAxes);
+DrawSteeringWheel(hSteeringWheelTransform);
+hSteeringAngleTxt=text(SteeringWheelAxes,-1,2,'');
+
+%OdometerAxes
+hOdometer=DrawOdometer(OdometerAxes);
+hOdometerArrow=hOdometer(2);
+hOdometerTxt=text(OdometerAxes,-1,2,'');
 %% Storing handles to "figure" and block "UserData"
 UserData.Fig = Fig;
-UserData.Axes = Axes;
+UserData.SceneAxes = SceneAxes;
 UserData.hCarTransform = hCarTransform;
+UserData.hFrontWheelsTransform = hFrontWheelsTransform;
 UserData.hPastLine=hPastLine;
-UserData.hTime = hTime;
+UserData.hTimeTxt = hTimeTxt;
+UserData.LimFactor=2;
+UserData.hSteeringWheelTransform = hSteeringWheelTransform;
+UserData.hSteeringAngleTxt = hSteeringAngleTxt;
+UserData.hOdometerArrow = hOdometerArrow;
+UserData.hOdometerTxt = hOdometerTxt;
 
 %Store in both figure and block
 set(gcbh,'UserData',UserData);
 end
-function GraphicHandles=DrawCar(Parent,W,L)
+function hCar=DrawCar(hCarTransform,hFrontWheelsTransform,W,L)
         purple=[0.5,0,0.5];
         yellow=[1,0.8,0];
+        brown=[0.6350, 0.0780, 0.1840];
         t=linspace(0,2*pi,7);
         t=t(1:end-1);
         r=W/6; %lights raidus
         
+        %            ---------
+        %------------------|O
+        %|                 |
+        %|                 |   Main axis is the 'X' axis
+        %|                 |
+        %------------------|O
+        %            ---------
+        
+        
         %Draw carBody
-        x_body=[-L/2, L/2, L/2, -L/2];
-        y_body=[-W/2, -W/2, W/2, W/2];
-        cgh=patch('Parent',Parent,'XData',x_body,'YData',y_body,'facecolor',purple);
+        x_body=L/2*[-1, -1, 1, 1];
+        y_body=W/2*[1, -1, -1, 1];
+        hCarBody=patch('Parent',hCarTransform,'XData',x_body,'YData',y_body,'facecolor',purple);
+        
+        %Draw front right Wheel
+        x_frw=L/4*[-1, -1, 1, 1]+L/3;
+        y_frw=W/4*[1, -1, -1, 1]-1.5*(W/2);
+        hFrontRightWheel=patch('Parent',hFrontWheelsTransform,'XData',x_frw,'YData',y_frw,'facecolor',brown);
+        
+        %Draw front left wheel
+        x_flw=L/4*[-1, -1, 1, 1]+L/3;
+        y_flw=W/4*[1, -1, -1, 1]+1.5*(W/2);
+        hFrontLeftWheel=patch('Parent',hFrontWheelsTransform,'XData',x_flw,'YData',y_flw,'facecolor',brown);
+        
+        %Draw rear right Wheel
+        x_rrw=L/4*[-1, -1, 1, 1]-L/3;
+        y_rrw=W/4*[1, -1, -1, 1]-1.5*(W/2);
+        hRearRightWheel=patch('Parent',hCarTransform,'XData',x_rrw,'YData',y_rrw,'facecolor',brown);
+        
+        %Draw rear left wheel
+        x_rlw=L/4*[-1, -1, 1, 1]-L/3;
+        y_rlw=W/4*[1, -1, -1, 1]+1.5*(W/2);
+        hRearLeftWheel=patch('Parent',hCarTransform,'XData',x_rlw,'YData',y_rlw,'facecolor',brown);
         
         %Draw right light
         x_rl=r*cos(t)+L/2;
         y_rl=r*sin(t)+W/4;
-        rlh=patch('Parent',Parent,'XData',x_rl,'YData',y_rl,'facecolor',yellow);
+        hRightLight=patch('Parent',hCarTransform,'XData',x_rl,'YData',y_rl,'facecolor',yellow);
         
         %Draw left light
         x_ll=r*cos(t)+L/2;
         y_ll=r*sin(t)-W/4;
-        llh=patch('Parent',Parent,'XData',x_ll,'YData',y_ll,'facecolor',yellow);
+        hLeftLight=patch('Parent',hCarTransform,'XData',x_ll,'YData',y_ll,'facecolor',yellow);
         
-        GraphicHandles=[cgh,rlh,llh];
+        hCar=[hCarBody,hRearRightWheel,hRearLeftWheel,hFrontRightWheel,hFrontLeftWheel,hRightLight,hLeftLight];
+end
+function hClock=DrawClock(Parent)
+t=linspace(0,2*pi,16);
+hCircle=plot(cos(t),sin(t),'linewidth',2,'color','k','Parent',Parent);
+hSmallLine=plot([0,0.5*cos(pi/3)],[0,0.5*sin(pi/3)],'linewidth',2,'color','k','Parent',Parent);
+hBigLine=plot([0,cos(pi/2)],[0,sin(pi/2)],'linewidth',2,'color','k','Parent',Parent);
+hClock=[hCircle,hSmallLine,hBigLine];
+end
+function hSteeringWheel=DrawSteeringWheel(Parent)
+t=linspace(0,3*pi,16);
+hCircle=plot(cos(t),sin(t),'linewidth',4,'color','k','Parent',Parent);
+hTopLine=plot([0,0],[0,1],'linewidth',4,'color','k','Parent',Parent);
+hLeftLine=plot([0,cos(-pi/5)],[0,sin(-pi/5)],'linewidth',4,'color','k','Parent',Parent);
+hRightLine=plot([0,cos(-pi+pi/5)],[0,sin(-pi+pi/5)],'linewidth',4,'color','k','Parent',Parent);
+hSteeringWheel=[hCircle,hTopLine,hLeftLine,hRightLine];
+end
+function hOdometer=DrawOdometer(Parent)
+t=linspace(0,pi,16);
+hArc=plot(cos(t),sin(t),'linewidth',2,'color','k','Parent',Parent);
+hArrow=quiver(0,0,-1,0,'linewidth',3,'color','r','autoscale','off','Parent',Parent);
+hOdometer=[hArc,hArrow];
+end
+function PushbuttonCallback(obj,eventdata,handle)
+set_param(bdroot(gcs),'SimulationCommand', 'stop');
 end
 %% Unused fcns
-function Terminate(block)
-end
 function Start(block)
 Enable=block.InputPort(1).Data(1);
 if ~Enable, return, end
@@ -206,4 +354,3 @@ end
 function CheckPrms(block)
   %can check validity of parameters here
 end
-
