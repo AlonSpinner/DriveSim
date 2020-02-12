@@ -108,13 +108,16 @@ if ~isempty(CurrentChar)
     block.OutputPort(2).Data=1;
     UserData.Fig.CurrentCharacter=char(0);
     
-   if any(keypressed==[30,31]) %up/down - acceleration or deceleration
-       %Updated Limfactor
-       TargetAccelerationSign=sign(30.5-keypressed); %30 is accelerate and 31 is decelerate
-       TargetVelocity=v+(5/3.6)*TargetAccelerationSign;
-       UserData.LimFactor=10*(TargetVelocity/Vmax)+2;
-       set(gcbh,'UserData',UserData); %updates the whole of UserData... unfournate
-   end
+    switch keypressed
+        case {30,31} %up/down - acceleration or deceleration
+            %Updated Limfactor
+            TargetAccelerationSign=sign(30.5-keypressed); %30 is accelerate and 31 is decelerate
+            TargetVelocity=v+(5/3.6)*TargetAccelerationSign; %5 is what is added on each keypress - see slx
+            UserData.LimFactor=10*(TargetVelocity/Vmax)+2;
+            set(gcbh,'UserData',UserData); %updates the whole of UserData... unfournate
+        case 27
+            PushbuttonCallback;
+    end
 else
     block.OutputPort(1).Data=0;
     block.OutputPort(2).Data=0;
