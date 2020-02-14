@@ -135,12 +135,12 @@ UserData.hTimeTxt.String=sprintf('Time %g[s]',Time);
 
 %Update steering wheel orientation and text
 UserData.hSteeringWheelTransform.Matrix=RSteeringWheel;
-UserData.hSteeringAngleTxt.String=sprintf('Steering Angle %.3g[deg]',round(delta*180/pi));
+UserData.hSteeringAngleTxt.String=sprintf('Steering Angle %.3g[deg]',delta*180/pi);
 
 %Update odometer orientation and text
 UserData.hOdometerArrow.UData=cos(pi-v/Vmax*pi);
 UserData.hOdometerArrow.VData=sin(pi-v/Vmax*pi);
-UserData.hOdometerTxt.String=sprintf('Velocity %.3g[km/h]',round(v*3.6));
+UserData.hOdometerTxt.String=sprintf('Velocity %.3g[km/h]',v*3.6);
 
 drawnow limitrate
 end
