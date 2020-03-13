@@ -162,8 +162,8 @@ else
 end
 
 %updated SceneAxes limits
-xlim(UserData.SceneAxes,UserData.LimFactor*L*[-1,1]+x);
-ylim(UserData.SceneAxes,UserData.LimFactor*L*[-1,1]+y);
+UserData.SceneAxes.XLim=UserData.LimFactor*L*[-1,1]+x;
+UserData.SceneAxes.YLim=UserData.LimFactor*L*[-1,1]+y;
 
 %--------Update auxiliary axes
 
