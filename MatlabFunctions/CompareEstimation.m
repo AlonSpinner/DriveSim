@@ -15,6 +15,7 @@ hold(SceneAxes,'on'); grid(SceneAxes,'on');
 SceneAxes.DataAspectRatio=[1,1,1];
 
 plot(SceneAxes,xGT,yGT,'linewidth',2,'color','b');
-% plot(SceneAxes,xIMU,yIMU,'linewidth',2,'color','g');
 plot(SceneAxes,xEst,yEst,'linewidth',2,'color','r');
-legend(SceneAxes,'Ground Truth','IMU','Estimation');
+legend(SceneAxes,'Ground Truth','Estimation');
+
+% plot(SceneAxes,xIMU,yIMU,'linewidth',2,'color','g');
